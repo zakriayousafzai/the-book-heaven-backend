@@ -1,39 +1,27 @@
-import Profile from "../models/profile.model.js";
 import { getAuth } from "@clerk/express";
+import Profile from "../models/profile.model.js";
+import Book from "../models/book.model.js";
 import { getClerkIdentity } from "../middleware/auth.middleware.js";
+import { ApiError } from "../utils/apiError.js";
+import { assertObjectId } from "../utils/objectId.js";
 
-export const getProfileByUsername = async (req, res) => {
+// Public profile by username. Owners also see their favorites and books that
+// are still pending or denied; everyone else only sees approved books.
+export const getProfileByUsername = async (req, res, next) => {
   try {
     const { username } = req.params;
+    if (!username?.trim()) {
+      throw new ApiError(400, "Username is required");
+    }
+
     const { isAuthenticated } = getAuth(req);
-    console.log("authenticate", isAuthenticated)
-    console.log("username",username)
+    const identity = isAuthenticated ? await getClerkIdentity(req) : null;
 
-    let isOwner = false;
-    if (isAuthenticated) {
-      const { userName } = await getClerkIdentity(req);
-      isOwner = userName === username;
-    }
+    const profile = await Profile.findOne({ username });
+    const isOwner = profile
+      ? Boolean(identity && profile.userId === identity.userId)
+      : Boolean(identity && identity.userName === username);
 
-    console.log("iswoner",isOwner)
-
-    const recommendedMatch = isOwner ? {} : { status: "allowed" };
-
-    const query = Profile.findOne({ username }).populate({
-      path: "recommendedBooks",
-      match: recommendedMatch,
-    });
-
-    if (isOwner) {
-      query.populate({
-        path: "favoriteBooks",
-        match: { status: "allowed" },
-      });
-    }
-
-    const profile = await query;
-
-      console.log("profile", profile)
     if (!profile) {
       if (isOwner) {
         return res.status(200).json({
@@ -42,7 +30,19 @@ export const getProfileByUsername = async (req, res) => {
           favoriteBooks: [],
         });
       }
-      return res.status(404).json({ message: "Profile not found" });
+      throw new ApiError(404, "Profile not found");
+    }
+
+    await profile.populate({
+      path: "recommendedBooks",
+      match: isOwner ? {} : { status: "allowed" },
+    });
+
+    if (isOwner) {
+      await profile.populate({
+        path: "favoriteBooks",
+        match: { status: "allowed" },
+      });
     }
 
     const recommendedBooks = (profile.recommendedBooks || []).filter(Boolean);
@@ -60,11 +60,12 @@ export const getProfileByUsername = async (req, res) => {
       recommendedBooks,
     });
   } catch (error) {
-    res.status(500).json({ message: "Error fetching profile", error });
+    next(error);
   }
 };
 
-export const getFavorites = async (req, res) => {
+// List the signed-in user's favorites (populated with book documents).
+export const getFavorites = async (req, res, next) => {
   try {
     const { userId } = getAuth(req);
     const profile = await Profile.findOne({ userId }).populate("favoriteBooks");
@@ -73,34 +74,43 @@ export const getFavorites = async (req, res) => {
       .status(200)
       .json(profile ? (profile.favoriteBooks || []).filter(Boolean) : []);
   } catch (error) {
-    res.status(500).json({ message: "Error fetching favorites", error });
+    next(error);
   }
 };
 
-export const addFavorite = async (req, res) => {
+// Add an approved book to the signed-in user's favorites.
+export const addFavorite = async (req, res, next) => {
   try {
     const { userId, userName } = await getClerkIdentity(req);
-    const { bookId } = req.body;
+    const { bookId } = req.body ?? {};
+    assertObjectId(bookId, "book");
+
+    const book = await Book.findById(bookId);
+    if (!book || book.status !== "allowed") {
+      throw new ApiError(404, "Book not found");
+    }
 
     const profile = await Profile.findOneAndUpdate(
       { userId },
       {
-        $addToSet: { favoriteBooks: bookId },
+        $addToSet: { favoriteBooks: book._id },
         $setOnInsert: { userId, username: userName },
       },
-      { new: true, upsert: true },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
     ).populate("favoriteBooks");
 
     res.status(201).json((profile.favoriteBooks || []).filter(Boolean));
   } catch (error) {
-    res.status(500).json({ message: "Error adding favorite", error });
+    next(error);
   }
 };
 
-export const deleteFavorite = async (req, res) => {
+// Remove a book from the signed-in user's favorites.
+export const deleteFavorite = async (req, res, next) => {
   try {
     const { userId } = getAuth(req);
     const { bookId } = req.params;
+    assertObjectId(bookId, "book");
 
     const profile = await Profile.findOneAndUpdate(
       { userId },
@@ -109,13 +119,14 @@ export const deleteFavorite = async (req, res) => {
     ).populate("favoriteBooks");
 
     if (!profile) {
-      return res.status(404).json({ message: "Profile not found" });
+      throw new ApiError(404, "Profile not found");
     }
 
-    res
-      .status(200)
-      .json({ message: "Favorite deleted successfully", favoriteBooks: profile.favoriteBooks });
+    res.status(200).json({
+      message: "Favorite deleted successfully",
+      favoriteBooks: (profile.favoriteBooks || []).filter(Boolean),
+    });
   } catch (error) {
-    res.status(500).json({ message: "Error deleting favorite", error });
+    next(error);
   }
 };

@@ -1,16 +1,22 @@
-import mongoose from "mongoose";
 import Book from "../models/book.model.js";
+import { ApiError } from "../utils/apiError.js";
+import { assertObjectId } from "../utils/objectId.js";
+import { buildPagination, getPagination } from "../utils/pagination.js";
 
-export const showPendingBooks = async (req, res) => {
+const MODERATION_STATUSES = ["pending", "allowed", "denied"];
+
+// List books by moderation status (defaults to pending).
+export const showPendingBooks = async (req, res, next) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = getPagination(req.query);
+    const status = req.query.status ?? "pending";
 
-    const allowedStatuses = ["pending", "allowed", "denied"];
-    const status = allowedStatuses.includes(req.query.status)
-      ? req.query.status
-      : "pending";
+    if (!MODERATION_STATUSES.includes(status)) {
+      throw new ApiError(
+        400,
+        `status must be one of: ${MODERATION_STATUSES.join(", ")}`,
+      );
+    }
 
     const filter = { status };
 
@@ -19,66 +25,53 @@ export const showPendingBooks = async (req, res) => {
       Book.countDocuments(filter),
     ]);
 
-    const totalPages = Math.ceil(totalItems / limit);
-
     res.status(200).json({
       data: books,
-      pagination: {
-        currentPage: page,
-        totalPages,
-        totalItems,
-        limit,
-      },
+      pagination: buildPagination(page, limit, totalItems),
     });
   } catch (error) {
-    res.status(500).json({ message: "Error fetching pending books", error });
+    next(error);
   }
 };
 
-export const approveBook = async (req, res) => {
+export const approveBook = async (req, res, next) => {
   try {
     const { bookId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(bookId)) {
-      return res.status(400).json({ message: "Invalid book id" });
-    }
+    assertObjectId(bookId, "book");
 
     const book = await Book.findByIdAndUpdate(
       bookId,
       { status: "allowed" },
-      { new: true },
+      { new: true, runValidators: true },
     );
 
     if (!book) {
-      return res.status(404).json({ message: "Book not found" });
+      throw new ApiError(404, "Book not found");
     }
 
     res.status(200).json({ message: "Book approved successfully", book });
   } catch (error) {
-    res.status(500).json({ message: "Error approving book", error });
+    next(error);
   }
 };
 
-export const denyBook = async (req, res) => {
+export const denyBook = async (req, res, next) => {
   try {
     const { bookId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(bookId)) {
-      return res.status(400).json({ message: "Invalid book id" });
-    }
+    assertObjectId(bookId, "book");
 
     const book = await Book.findByIdAndUpdate(
       bookId,
       { status: "denied" },
-      { new: true },
+      { new: true, runValidators: true },
     );
 
     if (!book) {
-      return res.status(404).json({ message: "Book not found" });
+      throw new ApiError(404, "Book not found");
     }
 
     res.status(200).json({ message: "Book denied successfully", book });
   } catch (error) {
-    res.status(500).json({ message: "Error denying book", error });
+    next(error);
   }
 };

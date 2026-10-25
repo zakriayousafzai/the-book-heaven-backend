@@ -1,54 +1,77 @@
 import { getAuth, clerkClient } from "@clerk/express";
+import { ApiError } from "../utils/apiError.js";
 
-// Derive the authenticated Clerk user's id and display name from the session.
-// Clerk user IDs are strings (e.g. "user_xxx"), not MongoDB ObjectIds.
+// Resolve the authenticated user's id, display name, and role. Session claims
+// are used when available; Clerk's API is only called when the token does not
+// carry the information (for example, a default session token without a
+// custom `username` or `metadata.role` claim).
 export const getClerkIdentity = async (req) => {
   const { userId, sessionClaims } = getAuth(req);
 
-  const user = await clerkClient.users.getUser(userId);
-  const userName = user.username;
-  const role = sessionClaims?.metadata?.role ?? user.publicMetadata?.role;
+  if (!userId) {
+    throw new ApiError(401, "Unauthorized");
+  }
 
-  console.log(`from auth middleware ${userName}`)
-  
-  return { userId, role, userName };
+  const claims = sessionClaims ?? {};
+  let userName = claims.username ?? claims.metadata?.userName;
+  let role = claims.metadata?.role;
+
+  if (!userName || !role) {
+    const user = await clerkClient.users.getUser(userId);
+    userName =
+      userName ??
+      user.username ??
+      user.primaryEmailAddress?.emailAddress ??
+      userId;
+    role = role ?? user.publicMetadata?.role;
+  }
+
+  return { userId, role, userName: userName ?? userId };
 };
 
-// Helper middleware to strictly enforce admin access
+export const getRole = async (req) => {
+  const { userId, sessionClaims } = getAuth(req);
+
+  if (!userId) {
+    return null;
+  }
+
+  const claimRole = sessionClaims?.metadata?.role;
+  if (claimRole) {
+    return claimRole;
+  }
+
+  const user = await clerkClient.users.getUser(userId);
+  return user.publicMetadata?.role ?? null;
+};
+
+export const isAdmin = async (req) => (await getRole(req)) === "admin";
+
 export const requireAdmin = async (req, res, next) => {
   try {
-    const { userId, sessionClaims } = getAuth(req);
+    const { userId } = getAuth(req);
 
     if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      throw new ApiError(401, "Unauthorized");
     }
 
-    let role = sessionClaims?.metadata?.role;
-
-    if (role !== "admin") {
-      const user = await clerkClient.users.getUser(userId);
-      role = user.publicMetadata?.role;
-    }
-
-    if (role !== "admin") {
-      return res
-        .status(403)
-        .json({ error: "Forbidden: Admin access required." });
+    if ((await getRole(req)) !== "admin") {
+      throw new ApiError(403, "Admin access required");
     }
 
     next();
   } catch (error) {
-    console.error("Error verifying admin access:", error);
-    res.status(500).json({ error: "Error verifying admin access" });
+    next(error);
   }
 };
 
 export const requireAuth = (req, res, next) => {
-  const { isAuthenticated } = getAuth(req);
+  const { isAuthenticated, userId } = getAuth(req);
 
-  if (!isAuthenticated) {
-    res.status(401).json({ error: "Unauthorized" });
+  if (!isAuthenticated || !userId) {
+    next(new ApiError(401, "Unauthorized"));
     return;
   }
+
   next();
 };

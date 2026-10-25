@@ -1,36 +1,37 @@
-import express from 'express'
-import books from './routes/book.router.js'
-import review from './routes/review.router.js'
-import connectToDatabase from './config/db.js'
-import cors from 'cors'
-import { PORT } from './config/env.js'
-import errorMiddleware from './middleware/error.middleware.js'
-import favoriteRouter from './routes/favorites.router.js'
-import profileRouter from './routes/profile.router.js'
-import { clerkMiddleware } from '@clerk/express';
-import searchRouter from './routes/search.router.js'
-import adminRouter from './routes/admin.router.js'
+import app from "./app.js";
+import connectToDatabase, { disconnectFromDatabase } from "./config/db.js";
+import { PORT } from "./config/env.js";
 
-const app = express();
+const port = Number(PORT) || 5000;
 
-app.use(cors());
-app.use(express.json());
-app.use(clerkMiddleware());
-
-app.use('/api', searchRouter);
-app.use('/api', books);
-app.use('/api', review);
-app.use('/api', favoriteRouter);
-app.use('/api/users', profileRouter);
-app.use('/api', adminRouter);
-
-app.use(errorMiddleware);
-
-app.get('/', (req, res) => {
-  res.send('Hello World!')
-});
-
-app.listen(PORT, async () => {
-  console.log(`Example app listening on http://localhost:${PORT}`);
+const startServer = async () => {
   await connectToDatabase();
+
+  const server = app.listen(port, () => {
+    console.log(`The Book Heaven API listening on http://localhost:${port}`);
+    console.log(`API docs available at http://localhost:${port}/api/docs`);
+  });
+
+  const shutdown = (signal) => {
+    console.log(`${signal} received. Closing the HTTP server...`);
+
+    server.close(async () => {
+      await disconnectFromDatabase();
+      console.log("Shutdown complete");
+      process.exit(0);
+    });
+
+    setTimeout(() => {
+      console.error("Graceful shutdown timed out. Forcing exit.");
+      process.exit(1);
+    }, 10000).unref();
+  };
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+};
+
+startServer().catch((error) => {
+  console.error("Unable to start the API:", error);
+  process.exit(1);
 });

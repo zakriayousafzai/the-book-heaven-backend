@@ -1,36 +1,83 @@
-const errorMiddleware = (err, req, res, next) => {
-    try {
-        
-        let error = {...err};
-        error.message = err.message;
-        console.log(err);
+import { isProduction } from "../config/env.js";
+import { ApiError } from "../utils/apiError.js";
 
-        // Mongoose bad ObjectId
-        if (err.name === 'CastError'){
-            const message = 'Resource not found';
-            error = new Error(message);
-            error.statusCode = 404;
-        }
+const normalizeError = (error) => {
+  if (error instanceof ApiError) {
+    return {
+      statusCode: error.statusCode,
+      message: error.message,
+      details: error.details,
+    };
+  }
 
-        // Mongoose duplicate key
-        if (err.code === 11000){
-            const message = 'Duplicate field value entered';
-            error = new Error(message);
-            error.statusCode = 400;
-        }
+  if (error.name === "CastError") {
+    return {
+      statusCode: 400,
+      message: `Invalid ${error.path ?? "resource"} id`,
+    };
+  }
 
-        // Mongoose validation error
-        if (err.name === 'ValidationError'){
-            const message = Object.values(err.errors).map(val => val.message);
-            error = new Error(message.join(', '));
-            error.statusCode = 400;
-        }
+  if (error.code === 11000) {
+    return {
+      statusCode: 409,
+      message: "A record with this value already exists",
+      details: error.keyValue,
+    };
+  }
 
-        res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Server Error'});
+  if (error.name === "ValidationError") {
+    return {
+      statusCode: 400,
+      message: "Validation failed",
+      details: Object.values(error.errors).map((item) => item.message),
+    };
+  }
 
-    } catch (error) {
-        next(error);
-    }
+  if (error.type === "entity.parse.failed") {
+    return { statusCode: 400, message: "Invalid JSON body" };
+  }
+
+  if (error.type === "entity.too.large") {
+    return { statusCode: 413, message: "Request body is too large" };
+  }
+
+  return {
+    statusCode: error.statusCode || 500,
+    message: error.message || "Internal server error",
+  };
+};
+
+// Normalize every failure into one predictable response envelope:
+// { success: false, error: "message", details?: [...] }
+const errorMiddleware = (error, req, res, next) => {
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+
+  const normalized = normalizeError(error);
+  const statusCode = normalized.statusCode;
+
+  if (statusCode >= 500) {
+    console.error(error);
+  }
+
+  const body = {
+    success: false,
+    error:
+      statusCode >= 500 && isProduction
+        ? "Internal server error"
+        : normalized.message,
+  };
+
+  if (
+    normalized.details !== undefined &&
+    !(statusCode >= 500 && isProduction)
+  ) {
+    body.details = normalized.details;
+  }
+
+  res.status(statusCode).json(body);
 };
 
 export default errorMiddleware;

@@ -1,23 +1,52 @@
 {
-  "name": "backend",
+  "name": "the-book-heaven-api",
   "version": "1.0.0",
+  "description": "REST API for The Book Heaven, a community-driven book recommendation platform.",
   "main": "server.js",
   "type": "module",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1",
+    "test:watch": "node --test --watch --test-concurrency=1",
+    "docs:check": "node scripts/check-openapi.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "nodejs",
+    "express",
+    "mongodb",
+    "mongoose",
+    "clerk",
+    "rest-api",
+    "book-recommendations"
+  ],
+  "author": "Zakria Yousafzai",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zakriayousafzai/the-book-heaven-backend.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zakriayousafzai/the-book-heaven-backend/issues"
+  },
+  "homepage": "https://github.com/zakriayousafzai/the-book-heaven-backend#readme",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "dependencies": {
-    "@clerk/express": "^2.1.37",
+    "@clerk/express": "^2.1.83",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "mongodb": "^6.12.0",
-    "mongoose": "^8.9.5",
-    "nodemon": "^3.1.9"
+    "express": "^4.22.3",
+    "helmet": "^8.3.0",
+    "mongoose": "^8.24.7",
+    "swagger-ui-express": "^5.0.1",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.3.0",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.3.1"
   }
 }

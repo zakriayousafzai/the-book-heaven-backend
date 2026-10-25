@@ -1,0 +1,863 @@
+openapi: 3.0.3
+info:
+  title: The Book Heaven API
+  version: 1.0.0
+  description: |
+    REST API for **The Book Heaven**, a community-driven book recommendation
+    platform. Visitors can browse and search an approved catalog. Signed-in
+    readers can recommend books, review approved titles, and save favorites.
+    Books submitted by non-admins enter a moderation queue before they become
+    publicly visible.
+
+    ### Authentication
+    Protected endpoints expect a Clerk session token:
+
+    ```http
+    Authorization: Bearer <clerk-session-token>
+    ```
+
+    The API verifies the token with `@clerk/express`. Admin endpoints also
+    require `role: "admin"` in the user's public metadata (or session claims).
+
+    ### Response envelopes
+    Collection endpoints return `{ data, pagination }`. Errors return
+    `{ success: false, error, details? }`. All other success shapes are shown
+    per endpoint.
+  contact:
+    name: Zakria Yousafzai
+    url: https://github.com/zakriayousafzai/the-book-heaven-backend
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: /
+    description: Current host (works locally and in production)
+tags:
+  - name: Health
+    description: Operational endpoints
+  - name: Books
+    description: Catalog, recommendations, and moderation-aware book access
+  - name: Search
+    description: Search approved books
+  - name: Reviews
+    description: Reader reviews and ratings
+  - name: Favorites
+    description: A signed-in reader's reading list
+  - name: Profiles
+    description: Public reader profiles
+  - name: Admin
+    description: Moderation queue and status changes
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness and readiness probe
+      security: []
+      responses:
+        "200":
+          description: API process is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                success: true
+                status: ok
+                database: connected
+                uptime: 1842
+                timestamp: "2026-10-25T12:00:00.000Z"
+  /api/books:
+    get:
+      tags: [Books]
+      summary: List approved books
+      description: "Returns a newest-first, paginated list of books with `status: allowed`."
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Paginated approved books
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookList"
+              example:
+                data:
+                  - _id: 671f1c2ab7c4d8e9f0123456
+                    userId: user_2abc123
+                    userName: zakria
+                    title: The Pragmatic Programmer
+                    author: Andrew Hunt, David Thomas
+                    genre: Software Engineering
+                    description: A practical guide to the habits and mindset behind good software.
+                    status: allowed
+                pagination:
+                  currentPage: 1
+                  totalPages: 4
+                  totalItems: 37
+                  limit: 10
+    post:
+      tags: [Books]
+      summary: Recommend a book
+      description: |
+        Creates a recommendation. Regular users receive `status: pending` until
+        an admin approves it; admins are published immediately. Also adds the
+        book to the author's profile.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookInput"
+            example:
+              title: The Pragmatic Programmer
+              author: Andrew Hunt, David Thomas
+              genre: Software Engineering
+              description: A practical guide to the habits and mindset behind good software.
+      responses:
+        "201":
+          description: Book recommendation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/books/search:
+    get:
+      tags: [Search]
+      summary: Search approved books
+      description: |
+        Case-insensitive literal search across title, author, genre, and
+        description. Only approved books are returned.
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search term (maximum 200 characters)
+          schema:
+            type: string
+            maxLength: 200
+          example: pragmatic
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Matching approved books
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/books/{id}:
+    parameters:
+      - $ref: "#/components/parameters/BookId"
+    get:
+      tags: [Books]
+      summary: Get a book by id
+      description: |
+        Approved books are public. Pending or denied books are only returned to
+        their owner or an admin; other callers receive `404`.
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Book found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Books]
+      summary: Update a book
+      description: |
+        Owners can update their own books; admins can update any book. Only
+        `title`, `author`, `genre`, and `description` are editable through this
+        endpoint. Ownership and moderation status cannot be changed here.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookUpdate"
+            example:
+              description: An updated description for the recommendation.
+      responses:
+        "200":
+          description: Updated book
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Books]
+      summary: Delete a book
+      description: |
+        Owners can delete their own books; admins can delete any book. Reviews
+        are removed and every profile reference to the book is cleaned up.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Book deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Book deleted successfully
+                  deletedBook:
+                    $ref: "#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/books/{id}/reviews:
+    parameters:
+      - $ref: "#/components/parameters/BookId"
+    get:
+      tags: [Reviews]
+      summary: List reviews for a book
+      description: |
+        Approved books are public. Owners and admins may also list reviews for a
+        book that is still in moderation; other callers receive `404`.
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Paginated reviews, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Reviews]
+      summary: Add a review
+      description: Only approved books can be reviewed.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewInput"
+            example:
+              rating: 5
+              comment: One of those books I wish I had read earlier.
+      responses:
+        "201":
+          description: Review created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Review added successfully
+                  newReview:
+                    $ref: "#/components/schemas/Review"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/reviews/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ReviewId"
+    put:
+      tags: [Reviews]
+      summary: Update a review
+      description: |
+        The review author or an admin can update a review. Only `rating` and
+        `comment` are editable.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewUpdate"
+            example:
+              rating: 4
+              comment: Still excellent on a second read.
+      responses:
+        "200":
+          description: Review updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Review updated successfully
+                  updatedReview:
+                    $ref: "#/components/schemas/Review"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Reviews]
+      summary: Delete a review
+      description: The review author or an admin can delete a review.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Review deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Review deleted successfully
+                  deletedReview:
+                    $ref: "#/components/schemas/Review"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/favorite:
+    get:
+      tags: [Favorites]
+      summary: List my favorites
+      description: Returns the signed-in user's favorite books, populated.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Array of favorite books
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Book"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Favorites]
+      summary: Add a favorite
+      description: Adds an approved book to the signed-in user's favorites. The operation is idempotent.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FavoriteInput"
+            example:
+              bookId: 671f1c2ab7c4d8e9f0123456
+      responses:
+        "201":
+          description: Updated array of favorite books
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/favorite/{bookId}:
+    parameters:
+      - name: bookId
+        in: path
+        required: true
+        schema:
+          type: string
+        example: 671f1c2ab7c4d8e9f0123456
+    delete:
+      tags: [Favorites]
+      summary: Remove a favorite
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Favorite removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Favorite deleted successfully
+                  favoriteBooks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/users/{username}:
+    parameters:
+      - name: username
+        in: path
+        required: true
+        schema:
+          type: string
+        example: zakria
+    get:
+      tags: [Profiles]
+      summary: Get a public profile
+      description: |
+        Public callers see the reader's approved recommendations. The signed-in
+        owner additionally receives their approved favorites and all of their
+        recommendations, including pending and denied books.
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/admin/books:
+    get:
+      tags: [Admin]
+      summary: List books by moderation status
+      description: Requires the `admin` role. Defaults to `pending`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, allowed, denied]
+            default: pending
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Paginated books for the requested status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/admin/books/{bookId}/approve:
+    parameters:
+      - $ref: "#/components/parameters/ModerationBookId"
+    post:
+      tags: [Admin]
+      summary: Approve a book
+      description: Sets the book's status to `allowed`.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Book approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Book approved successfully
+                  book:
+                    $ref: "#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/admin/books/{bookId}/deny:
+    parameters:
+      - $ref: "#/components/parameters/ModerationBookId"
+    post:
+      tags: [Admin]
+      summary: Deny a book
+      description: Sets the book's status to `denied`.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Book denied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Book denied successfully
+                  book:
+                    $ref: "#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Clerk session token. The API verifies it with `@clerk/express`.
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      description: 1-based page number
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size (maximum 100)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+    BookId:
+      name: id
+      in: path
+      required: true
+      description: Book ObjectId
+      schema:
+        type: string
+      example: 671f1c2ab7c4d8e9f0123456
+    ModerationBookId:
+      name: bookId
+      in: path
+      required: true
+      description: Book ObjectId
+      schema:
+        type: string
+      example: 671f1c2ab7c4d8e9f0123456
+    ReviewId:
+      name: id
+      in: path
+      required: true
+      description: Review ObjectId
+      schema:
+        type: string
+      example: 671f1c2ab7c4d8e9f0123457
+  responses:
+    BadRequest:
+      description: Invalid input, id, or query parameter
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            success: false
+            error: Invalid book id
+    Unauthorized:
+      description: Missing or invalid Clerk session token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            success: false
+            error: Unauthorized
+    Forbidden:
+      description: Authenticated but not allowed to perform this action
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            success: false
+            error: You can only update your own books
+    NotFound:
+      description: Resource not found or not visible to the caller
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            success: false
+            error: Book not found
+    Conflict:
+      description: Unique constraint violation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            success: false
+            error: A record with this value already exists
+  schemas:
+    Health:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        status:
+          type: string
+          example: ok
+        database:
+          type: string
+          enum: [disconnected, connected, connecting, disconnecting]
+        uptime:
+          type: integer
+          description: Process uptime in seconds
+        timestamp:
+          type: string
+          format: date-time
+    BookInput:
+      type: object
+      required: [title, author, genre, description]
+      properties:
+        title:
+          type: string
+          example: The Pragmatic Programmer
+        author:
+          type: string
+          example: Andrew Hunt, David Thomas
+        genre:
+          type: string
+          example: Software Engineering
+        description:
+          type: string
+          example: A practical guide to the habits and mindset behind good software.
+    BookUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        title:
+          type: string
+        author:
+          type: string
+        genre:
+          type: string
+        description:
+          type: string
+    Book:
+      type: object
+      properties:
+        _id:
+          type: string
+          example: 671f1c2ab7c4d8e9f0123456
+        userId:
+          type: string
+          description: Clerk user id of the recommender
+          example: user_2abc123
+        userName:
+          type: string
+          example: zakria
+        title:
+          type: string
+        author:
+          type: string
+        genre:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [allowed, pending, denied]
+        __v:
+          type: integer
+          example: 0
+    ReviewInput:
+      type: object
+      required: [rating, comment]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 5
+        comment:
+          type: string
+          example: One of those books I wish I had read earlier.
+    ReviewUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+    Review:
+      type: object
+      properties:
+        _id:
+          type: string
+          example: 671f1c2ab7c4d8e9f0123457
+        bookId:
+          type: string
+          example: 671f1c2ab7c4d8e9f0123456
+        userId:
+          type: string
+          example: user_2abc123
+        reviewerName:
+          type: string
+          example: zakria
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+        __v:
+          type: integer
+    FavoriteInput:
+      type: object
+      required: [bookId]
+      properties:
+        bookId:
+          type: string
+          example: 671f1c2ab7c4d8e9f0123456
+    Profile:
+      type: object
+      properties:
+        username:
+          type: string
+          example: zakria
+        recommendedBooks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Book"
+        favoriteBooks:
+          type: array
+          description: Present only when the caller is the profile owner.
+          items:
+            $ref: "#/components/schemas/Book"
+    Pagination:
+      type: object
+      properties:
+        currentPage:
+          type: integer
+          example: 1
+        totalPages:
+          type: integer
+          example: 4
+        totalItems:
+          type: integer
+          example: 37
+        limit:
+          type: integer
+          example: 10
+    BookList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Book"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+    ReviewList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Review"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+    Error:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          example: Book not found
+        details:
+          description: Optional validation or duplicate-key details
+          oneOf:
+            - type: array
+              items:
+                type: string
+            - type: object
+              additionalProperties: true

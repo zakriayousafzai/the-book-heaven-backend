@@ -1,18 +1,23 @@
 import Book from "../models/book.model.js";
+import { ApiError } from "../utils/apiError.js";
+import { escapeRegExp } from "../utils/escapeRegex.js";
+import { buildPagination, getPagination } from "../utils/pagination.js";
 
-export const searchBooks = async (req, res) => {
+// Search approved books by title, author, genre, or description.
+export const searchBooks = async (req, res, next) => {
   try {
-    const { q } = req.query;
+    const query = req.query.q?.trim();
 
-    if (!q || q.trim() === "") {
-      return res.status(400).json({ message: "Search query is required" });
+    if (!query) {
+      throw new ApiError(400, "Search query is required");
     }
 
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
-    const skip = (page - 1) * limit;
+    if (query.length > 200) {
+      throw new ApiError(400, "Search query must be 200 characters or fewer");
+    }
 
-    const regex = new RegExp(q.trim(), "i");
+    const { page, limit, skip } = getPagination(req.query);
+    const regex = new RegExp(escapeRegExp(query), "i");
     const filter = {
       status: "allowed",
       $or: [
@@ -24,22 +29,15 @@ export const searchBooks = async (req, res) => {
     };
 
     const [books, totalItems] = await Promise.all([
-      Book.find(filter).skip(skip).limit(limit),
+      Book.find(filter).sort({ _id: -1 }).skip(skip).limit(limit),
       Book.countDocuments(filter),
     ]);
 
-    const totalPages = Math.ceil(totalItems / limit);
-
     res.status(200).json({
       data: books,
-      pagination: {
-        currentPage: page,
-        totalPages,
-        totalItems,
-        limit,
-      },
+      pagination: buildPagination(page, limit, totalItems),
     });
   } catch (error) {
-    res.status(500).json({ message: "Error searching books", error });
+    next(error);
   }
-}
+};

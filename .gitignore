@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/.nyc_output
+/.cache
 
 # next.js
 /.next/
@@ -24,6 +26,7 @@
 # misc
 .DS_Store
 *.pem
+*.log
 
 # debug
 npm-debug.log*
@@ -31,8 +34,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (keep the example template committed)
 .env*
+!.env.example
 
 # vercel
 .vercel

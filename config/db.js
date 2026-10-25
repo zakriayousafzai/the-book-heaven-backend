@@ -1,19 +1,21 @@
 import mongoose from "mongoose";
-import { DB_URI } from "../config/env.js";
-import process from 'node:process';
-
-if(!DB_URI){
-    throw new Error('Please define the MONGODB_URI environmental variable inside .env')
-}
+import process from "node:process";
+import { DB_URI } from "./env.js";
 
 const connectToDatabase = async () => {
-    try {
-        await mongoose.connect(DB_URI);
-        console.log('Connected to Database Successfully')
-    } catch (error) {
-        console.error('Error connecting to database: ', error)
-        process.exit(1);
-    }
-}
+  if (!DB_URI) {
+    throw new Error(
+      "DB_URI is not defined. Copy .env.example to .env and add your MongoDB connection string.",
+    );
+  }
+
+  mongoose.set("strictQuery", true);
+  await mongoose.connect(DB_URI, { serverSelectionTimeoutMS: 10000 });
+  console.log("Connected to MongoDB");
+};
+
+export const disconnectFromDatabase = async () => {
+  await mongoose.disconnect();
+};
 
 export default connectToDatabase;

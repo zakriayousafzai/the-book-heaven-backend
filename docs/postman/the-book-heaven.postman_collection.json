@@ -1,0 +1,443 @@
+{
+  "info": {
+    "name": "The Book Heaven API",
+    "description": "Collection for the The Book Heaven REST API.\n\n1. Set `baseUrl` (default http://localhost:5000).\n2. Set `clerkToken` to a Clerk session token for protected requests.\n3. Run **Books > Create book** to populate `bookId`, then **Reviews > Create review** to populate `reviewId`.\n\nAdmin requests also require `role: \"admin\"` on the Clerk user.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Liveness probe. `database` reports the current Mongoose connection state."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('API is healthy', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Books",
+      "item": [
+        {
+          "name": "List approved books",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/books?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "books"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Paginated, newest-first list of approved books."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns a book collection', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().data).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Search books",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/books/search?q=pragmatic",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "books", "search"],
+              "query": [{ "key": "q", "value": "pragmatic" }]
+            },
+            "description": "Literal, case-insensitive search across title, author, genre, and description. Only approved books are returned."
+          },
+          "response": []
+        },
+        {
+          "name": "Get book by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/books/{{bookId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "books", "{{bookId}}"]
+            },
+            "description": "Approved books are public. Pending/denied books require the owner or an admin."
+          },
+          "response": []
+        },
+        {
+          "name": "Create book",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"The Pragmatic Programmer\",\n  \"author\": \"Andrew Hunt, David Thomas\",\n  \"genre\": \"Software Engineering\",\n  \"description\": \"A practical guide to the habits and mindset behind good software.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/books",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "books"]
+            },
+            "description": "Creates a recommendation. Regular users receive status `pending`; admins are published immediately. The request also creates/updates the author's profile and stores the new id in `bookId`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Book created', () => pm.response.to.have.status(201));",
+                  "if (body._id) pm.collectionVariables.set('bookId', body._id);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update book",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"The Pragmatic Programmer, 20th Anniversary Edition\",\n  \"description\": \"An updated recommendation note.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/books/{{bookId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "books", "{{bookId}}"]
+            },
+            "description": "Owner or admin only. Only title, author, genre, and description are editable; status and ownership are ignored."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete book",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/books/{{bookId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "books", "{{bookId}}"]
+            },
+            "description": "Owner or admin only. Cascades reviews and removes profile references."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reviews",
+      "item": [
+        {
+          "name": "List reviews for a book",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/books/{{bookId}}/reviews?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "books", "{{bookId}}", "reviews"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Paginated reviews, newest first."
+          },
+          "response": []
+        },
+        {
+          "name": "Create review",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"comment\": \"One of those books I wish I had read earlier.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/books/{{bookId}}/reviews",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "books", "{{bookId}}", "reviews"]
+            },
+            "description": "Requires an approved book. Stores the new review id in `reviewId`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Review created', () => pm.response.to.have.status(201));",
+                  "if (body.newReview && body.newReview._id) pm.collectionVariables.set('reviewId', body.newReview._id);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update review",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 4,\n  \"comment\": \"Still excellent on a second read.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reviews/{{reviewId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "reviews", "{{reviewId}}"]
+            },
+            "description": "Review author or admin only. Only rating and comment are editable."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete review",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reviews/{{reviewId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "reviews", "{{reviewId}}"]
+            },
+            "description": "Review author or admin only."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Favorites",
+      "item": [
+        {
+          "name": "List my favorites",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/favorite",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "favorite"]
+            },
+            "description": "Returns the signed-in user's favorite books, populated."
+          },
+          "response": []
+        },
+        {
+          "name": "Add favorite",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookId\": \"{{bookId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/favorite",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "favorite"]
+            },
+            "description": "Adds an approved book idempotently."
+          },
+          "response": []
+        },
+        {
+          "name": "Remove favorite",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/favorite/{{bookId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "favorite", "{{bookId}}"]
+            },
+            "description": "Removes the book from the signed-in user's favorites."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Profiles",
+      "item": [
+        {
+          "name": "Get profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{username}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "{{username}}"]
+            },
+            "description": "Public profile. The owner additionally sees pending recommendations and approved favorites. Remove the bearer auth to simulate a visitor."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "List books by status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/books?status=pending&page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "books"],
+              "query": [
+                { "key": "status", "value": "pending" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Requires the admin role. `status` may be pending, allowed, or denied."
+          },
+          "response": []
+        },
+        {
+          "name": "Approve book",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/books/{{bookId}}/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "books", "{{bookId}}", "approve"]
+            },
+            "description": "Requires the admin role."
+          },
+          "response": []
+        },
+        {
+          "name": "Deny book",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{clerkToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/books/{{bookId}}/deny",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "books", "{{bookId}}", "deny"]
+            },
+            "description": "Requires the admin role."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "clerkToken", "value": "" },
+    { "key": "bookId", "value": "" },
+    { "key": "reviewId", "value": "" },
+    { "key": "username", "value": "your-username" }
+  ]
+}
